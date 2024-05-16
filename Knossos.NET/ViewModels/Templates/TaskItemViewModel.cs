@@ -1,4 +1,4 @@
-﻿using Avalonia.Threading;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Knossos.NET.Models;
 using Knossos.NET.Views;
@@ -2657,8 +2657,8 @@ namespace Knossos.NET.ViewModels
                     {
                         cancellationTokenSource = new CancellationTokenSource();
                     }
-
-                    return await KnUtils.DecompressFile(filepath, dest, cancellationTokenSource, extractFullPath, deCompressionCallback);
+                    IsCompleted = await KnUtils.DecompressFile(filepath, dest, cancellationTokenSource, extractFullPath, deCompressionCallback);
+                    return IsCompleted;
                 }
                 else
                 {
@@ -3273,6 +3273,11 @@ namespace Knossos.NET.ViewModels
                             Log.Add(Log.LogSeverity.Error, "TaskItemViewModel.InstallMod()", "Error while decompressing the file " + fileFullPath);
                             CancelTaskCommand();
                         }
+                        else
+                        {
+                            await Dispatcher.UIThread.InvokeAsync(() => TaskList.Remove(decompressTask));
+                        }
+
                         File.Delete(fileFullPath);
                         ++ProgressCurrent;
                         Info = "Tasks: " + ProgressCurrent + "/" + ProgressBarMax;
