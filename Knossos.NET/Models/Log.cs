@@ -1,5 +1,6 @@
 ﻿using Avalonia.Threading;
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -19,6 +20,17 @@ namespace Knossos.NET
             Error
         }
 
+        private static string ToLogString(this LogSeverity severity)
+        {
+            return severity switch
+            {
+                LogSeverity.Information => "INFO",
+                LogSeverity.Warning => "WARN",
+                LogSeverity.Error => "ERROR",
+                _ => throw new InvalidEnumArgumentException(nameof(severity)),
+            };
+        }
+
         public static string LogFilePath = KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar + "Knossos.log";
 
         /// <summary>
@@ -31,21 +43,21 @@ namespace Knossos.NET
         /// <param name="data"></param>
         public static void Add(LogSeverity logSeverity, string from, string data)
         {
-            var logString = DateTime.Now.ToString() + " - *" + logSeverity.ToString() + "* : (" + from + ") " + data;
+            string logString = $"{DateTime.Now:s} {logSeverity.ToLogString()} [{from}] - {data}";
             if (Knossos.globalSettings.enableLogFile && (int)logSeverity >= Knossos.globalSettings.logLevel )
             {
-                Task.Run(async () => {
-                    try
+                Task.Run(async () =>
+                {
+                    for (int i = 0; i < 10; i++)
                     {
-                        await WaitForFileAccess(LogFilePath);
-                        using (var writer = new StreamWriter(LogFilePath, true))
+                        try
                         {
-                            writer.WriteLine(logString, Encoding.UTF8);
+                            await File.AppendAllTextAsync(LogFilePath, logString + Environment.NewLine, Encoding.UTF8);
+                            return;
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        WriteToConsole(ex.Message);
+                        catch
+                        {
+                        }
                     }
                 });
             }
