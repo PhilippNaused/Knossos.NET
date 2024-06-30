@@ -39,6 +39,8 @@ namespace Knossos.NET.ViewModels
         internal bool blDlNebula = false;
         [ObservableProperty]
         internal bool blAigaion = false;
+        [ObservableProperty]
+        internal bool blTalos = false;
 
         [ObservableProperty]
         internal bool flagDataLoaded = false;
@@ -86,6 +88,18 @@ namespace Knossos.NET.ViewModels
         internal bool autoUpdate = false;
         [ObservableProperty]
         internal bool deleteUploadedFiles = true;
+        [ObservableProperty]
+        internal bool updateNightly = false;
+        [ObservableProperty]
+        internal bool updateStable = false;
+        [ObservableProperty]
+        internal bool updateRC = false;
+        [ObservableProperty]
+        internal bool deleteOlder = false;
+        [ObservableProperty]
+        internal bool noSystemCMD = false;
+        [ObservableProperty]
+        internal bool showDevOptions = false;
 
         /*VIDEO*/
         [ObservableProperty]
@@ -166,7 +180,6 @@ namespace Knossos.NET.ViewModels
         internal int joy4SelectedIndex = -1;
 
         /* MOD / FS2 */
-        [ObservableProperty]
         internal string globalCmd = string.Empty;
         [ObservableProperty]
         internal int fs2LangSelectedIndex = 0;
@@ -178,6 +191,24 @@ namespace Knossos.NET.ViewModels
         internal uint joystickSensitivity = 9;
         [ObservableProperty]
         internal uint joystickDeadZone = 10;
+
+        // In order to have hidden dev options, we need a setter for globalCMD
+        public string GlobalCmd
+        {
+            get
+            {
+                return globalCmd;
+            }
+            set
+            {
+
+                if (value.Contains("freespace2.com") && !ShowDevOptions){   
+                    ToggleDeveloperOptions();
+                }
+
+                SetProperty(ref globalCmd, value.Replace("freespace2.com", ""));
+            }
+        }
 
         public GlobalSettingsViewModel()
         {
@@ -262,6 +293,10 @@ namespace Knossos.NET.ViewModels
                 {
                     BlAigaion = true;
                 }
+                if (Knossos.globalSettings.mirrorBlacklist.Contains("talos.feralhosting.com"))
+                {
+                    BlTalos = true;
+                }
             }
 
             ModCompression = Knossos.globalSettings.modCompression;
@@ -269,6 +304,12 @@ namespace Knossos.NET.ViewModels
             CheckUpdates = Knossos.globalSettings.checkUpdate;
             AutoUpdate = Knossos.globalSettings.autoUpdate;
             DeleteUploadedFiles = Knossos.globalSettings.deleteUploadedFiles;
+            UpdateNightly = Knossos.globalSettings.autoUpdateBuilds.UpdateNightly;
+            UpdateRC = Knossos.globalSettings.autoUpdateBuilds.UpdateRC;
+            UpdateStable = Knossos.globalSettings.autoUpdateBuilds.UpdateStable;
+            DeleteOlder = Knossos.globalSettings.autoUpdateBuilds.DeleteOlder;
+            NoSystemCMD = Knossos.globalSettings.noSystemCMD;
+            ShowDevOptions = Knossos.globalSettings.showDevOptions || NoSystemCMD;
 
             /* VIDEO SETTINGS */
             //RESOLUTION
@@ -800,7 +841,11 @@ namespace Knossos.NET.ViewModels
             {
                 blMirrors.Add("aigaion.feralhosting.com");
             }
-            if(blMirrors.Any() && blMirrors.Count() != 3 /*Invalid!*/)
+            if (BlTalos)
+            {
+                blMirrors.Add("talos.feralhosting.com");
+            }
+            if (blMirrors.Any() && blMirrors.Count() != 4 /*Invalid!*/)
             {
                 Knossos.globalSettings.mirrorBlacklist = blMirrors.ToArray();
             }
@@ -810,6 +855,7 @@ namespace Knossos.NET.ViewModels
                 BlDlNebula = false;
                 BlCfNebula = false;
                 BlAigaion = false;
+                BlTalos = false;
             }
 
             Knossos.globalSettings.modCompression = ModCompression;
@@ -821,6 +867,9 @@ namespace Knossos.NET.ViewModels
                 AutoUpdate = false;
             }
             Knossos.globalSettings.autoUpdate = AutoUpdate;
+            Knossos.globalSettings.autoUpdateBuilds = new GlobalSettings.AutoUpdateFsoBuilds(UpdateStable, UpdateRC, UpdateNightly, DeleteOlder);
+            Knossos.globalSettings.noSystemCMD = NoSystemCMD;
+            Knossos.globalSettings.showDevOptions = ShowDevOptions;
 
             /* VIDEO */
             //Resolution
@@ -1142,6 +1191,16 @@ namespace Knossos.NET.ViewModels
             var dialog = new Views.DebugFiltersView();
             dialog.DataContext = new DebugFiltersViewModel();
             await dialog.ShowDialog<DebugFiltersView?>(MainWindow.instance!);
+        }
+
+        internal void ToggleDeveloperOptions()
+        {
+            ShowDevOptions = !ShowDevOptions;
+
+            // if we are turning off dev options, we need to actually restore to default
+            if (!ShowDevOptions){
+                NoSystemCMD = false;
+            }
         }
 
     }
