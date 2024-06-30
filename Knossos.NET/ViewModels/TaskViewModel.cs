@@ -247,6 +247,17 @@ namespace Knossos.NET.ViewModels
         }
 
         /// <summary>
+        /// Toggle task panel visibility
+        /// </summary>
+        public void ToggleCommand()
+        {
+            Dispatcher.UIThread.Invoke(() =>
+            {
+                ShowTaskList = !ShowTaskList;
+            });
+        }
+
+        /// <summary>
         /// Return number of tasks in list
         /// </summary>
         /// <returns></returns>
@@ -262,7 +273,7 @@ namespace Knossos.NET.ViewModels
         /// <param name="sender"></param>
         /// <param name="modJson"></param>
         /// <returns>FsoBuild class of the installed build or null if failed or cancelled</returns>
-        public async Task<FsoBuild?> InstallBuild(FsoBuild build, FsoBuildItemViewModel sender, Mod? modJson=null, List<ModPackage>? modifyPkgs = null)
+        public async Task<FsoBuild?> InstallBuild(FsoBuild build, FsoBuildItemViewModel sender, Mod? modJson=null, List<ModPackage>? modifyPkgs = null, bool cleanupOldVersions = false)
         {
             if(Knossos.GetKnossosLibraryPath() == null)
             {
@@ -278,7 +289,7 @@ namespace Knossos.NET.ViewModels
                 TaskList.Add(newTask);
                 taskQueue.Enqueue(newTask);
             });
-            return await newTask.InstallBuild(build, sender,sender.cancellationTokenSource,modJson, modifyPkgs).ConfigureAwait(false);
+            return await newTask.InstallBuild(build, sender,sender.cancellationTokenSource,modJson, modifyPkgs, cleanupOldVersions).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -288,7 +299,7 @@ namespace Knossos.NET.ViewModels
         /// <param name="mod"></param>
         /// <param name="reinstallPkgs"></param>
         /// <param name="manualCompress"></param>
-        public async void InstallMod(Mod mod, List<ModPackage>? reinstallPkgs = null, bool manualCompress = false, bool cleanupOldVersions = false)
+        public async void InstallMod(Mod mod, List<ModPackage>? reinstallPkgs = null, bool manualCompress = false, bool cleanupOldVersions = false, bool cleanInstall = false, bool allowHardlinks = true)
         {
             if (Knossos.GetKnossosLibraryPath() == null)
             {
@@ -314,7 +325,7 @@ namespace Knossos.NET.ViewModels
                         TaskList.Add(newTask);
                         taskQueue.Enqueue(newTask);
                     });
-                    await newTask.InstallMod(mod, cancelSource, reinstallPkgs, manualCompress, cleanupOldVersions).ConfigureAwait(false);
+                    await newTask.InstallMod(mod, cancelSource, reinstallPkgs, manualCompress, cleanupOldVersions, cleanInstall, allowHardlinks).ConfigureAwait(false);
                 }
             }
         }
