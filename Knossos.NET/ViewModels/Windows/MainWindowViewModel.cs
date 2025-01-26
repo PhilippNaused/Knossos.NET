@@ -4,12 +4,16 @@ using Knossos.NET.Views;
 using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Collections.ObjectModel;
+using Avalonia.Threading;
+using System.Threading;
 
 namespace Knossos.NET.ViewModels
 {
+    public record MainViewMenuItem(ViewModelBase vm, string? iconRoute, string label, string tooltip);
+
     /// <summary>
     /// Main Windows View Mode
     /// Everything starts here
@@ -19,29 +23,53 @@ namespace Knossos.NET.ViewModels
     {
         public static MainWindowViewModel? Instance { get; set; }
 
+        /* Single TC mode specific stuff */
+        [ObservableProperty]
+        internal NebulaLoginViewModel? nebulaLoginVM;
+        [ObservableProperty]
+        internal CustomHomeViewModel? customHomeVM;
+        /**/
+
         /* UI Bindings, use the uppercase version, otherwise changes will not register */
         [ObservableProperty]
         internal string appTitle = "Knossos.NET v" + Knossos.AppVersion;
         [ObservableProperty]
-        internal ModListViewModel installedModsView = new ModListViewModel();
+        internal int? windowWidth = null;
         [ObservableProperty]
-        internal NebulaModListViewModel nebulaModsView = new NebulaModListViewModel();
+        internal int? windowHeight = null;
         [ObservableProperty]
-        internal FsoBuildsViewModel fsoBuildsView = new FsoBuildsViewModel();
+        internal ModListViewModel? installedModsView;
         [ObservableProperty]
-        internal DeveloperModsViewModel developerModView = new DeveloperModsViewModel();
+        internal NebulaModListViewModel? nebulaModsView;
         [ObservableProperty]
-        internal PxoViewModel pxoView = new PxoViewModel();
+        internal FsoBuildsViewModel? fsoBuildsView;
         [ObservableProperty]
-        internal GlobalSettingsViewModel globalSettingsView = new GlobalSettingsViewModel();
+        internal DeveloperModsViewModel? developerModView;
+        [ObservableProperty]
+        internal PxoViewModel? pxoView;
+        [ObservableProperty]
+        internal GlobalSettingsViewModel? globalSettingsView;
         [ObservableProperty]
         internal TaskViewModel taskView = new TaskViewModel();
         [ObservableProperty]
-        internal CommunityViewModel communityView = new CommunityViewModel();
+        internal CommunityViewModel? communityView;
         [ObservableProperty]
-        internal string uiConsoleOutput = string.Empty;
+        internal DebugViewModel? debugView;
         [ObservableProperty]
         internal TaskInfoButtonViewModel? taskInfoButton;
+        [ObservableProperty]
+        internal bool isMenuOpen = true;
+        [ObservableProperty]
+        internal ObservableCollection<MainViewMenuItem>? menuItems;
+        [ObservableProperty]
+        private MainViewMenuItem? selectedMenuItem;
+        [ObservableProperty]
+        internal ViewModelBase? currentViewModel;
+        [ObservableProperty]
+        internal int taskButtomRow = 0;
+        [ObservableProperty]
+        internal int buttomListRow = 1;
+
 
         internal string sharedSearch = string.Empty;
 
@@ -56,79 +84,18 @@ namespace Knossos.NET.ViewModels
             unsorted
         }
 
-        internal SortType sharedSortType = SortType.name;
-        internal int tabIndex = 0;
-        internal int TabIndex
+        private SortType _sortType = SortType.name; //do not use directly
+        internal SortType sharedSortType
         {
-            get => tabIndex;
+            get { return _sortType; }
             set
             {
-                /* Execute code when user changes tab */
-                if (value != tabIndex)
+                if (_sortType != value)
                 {
-                    // Things to do on tab exit
-                    if (tabIndex == 0) //Exiting the Play tab.
-                    {
-                        sharedSearch = InstalledModsView.Search;
-
-                        // Change and save to the new sort type.
-                        if (sharedSortType != InstalledModsView.sortType && InstalledModsView.sortType != SortType.unsorted)
-                        {
-                            sharedSortType = InstalledModsView.sortType;
-                            Knossos.globalSettings.Save(false);
-                        }
-                    }
-                    if (tabIndex == 1) //Exiting the Nebula tab.
-                    {
-                        sharedSearch = NebulaModsView.Search;
-
-                        if (sharedSortType != NebulaModsView.sortType && NebulaModsView.sortType != SortType.unsorted)
-                        {
-                            sharedSortType = NebulaModsView.sortType;
-                            Knossos.globalSettings.Save(false);
-                        }
-                    }
-
-                    // Things to do on tab entrance
-                    this.SetProperty(ref tabIndex, value);
-                    if (tabIndex == 0) //Play Tab
-                    {
-                        InstalledModsView.Search = sharedSearch;
-                        InstalledModsView.ChangeSort(sharedSortType);
-                    }
-                    if (tabIndex == 1) //Nebula Mods
-                    {
-                        NebulaModsView.OpenTab(sharedSearch, sharedSortType);
-                    }
-                    if (tabIndex == 3) //Dev Tab
-                    {
-                        DeveloperModsViewModel.Instance?.MaybeChangeSorting();
-                        DeveloperModView.UpdateBuildInstallButtons();
-                    }
-                    if (tabIndex == 4) //Community Tab
-                    {
-                        Task.Run(async()=>{await CommunityView.LoadFAQRepo();});                     
-                    }
-                    if (tabIndex == 5) //PXO
-                    {
-                        PxoViewModel.Instance!.InitialLoad();
-                    }
-                    if (tabIndex == 6) //Settings
-                    {
-                        Knossos.globalSettings.Load();
-                        GlobalSettingsView.LoadData();
-                        Knossos.globalSettings.EnableIniWatch();
-                        GlobalSettingsView.UpdateImgCacheSize();
-                    }
-                    else
-                    {
-                        Knossos.globalSettings.DisableIniWatch();
-                    }
-                    if (tabIndex == 7) // Debug
-                    {
-//                        LoadDebugRepo
-                    }
-
+                    //change sort and update globalsettings value
+                    //to be saved at app close
+                    this.SetProperty(ref _sortType, value);
+                    Knossos.globalSettings.sortType = value;
                 }
             }
         }
@@ -151,7 +118,238 @@ namespace Knossos.NET.ViewModels
                     forceUpdate = true;
                 }
             }
+            if (!CustomLauncher.IsCustomMode)
+            {
+                InstalledModsView = new ModListViewModel();
+                NebulaModsView = new NebulaModListViewModel();
+                FsoBuildsView = new FsoBuildsViewModel();
+                DeveloperModView = new DeveloperModsViewModel();
+                GlobalSettingsView = new GlobalSettingsViewModel();
+                PxoView = new PxoViewModel();
+                CommunityView = new CommunityViewModel();
+                DebugView = new DebugViewModel();
+                FillMenuItemsNormalMode(1);
+            }
+            else
+            {
+                //Apply customization for Single TC Mode
+                Knossos.globalSettings.mainMenuOpen = CustomLauncher.MenuOpenFirstTime;
+                AppTitle = CustomLauncher.WindowTitle + " v" + Knossos.AppVersion;
+                WindowHeight = CustomLauncher.WindowHeight;
+                WindowWidth = CustomLauncher.WindowWidth;
+                CustomHomeVM = new CustomHomeViewModel();
+                if (CustomLauncher.MenuDisplayEngineEntry)
+                    FsoBuildsView = new FsoBuildsViewModel();
+                if(CustomLauncher.MenuDisplayGlobalSettingsEntry)
+                    GlobalSettingsView = new GlobalSettingsViewModel();
+                if(CustomLauncher.MenuDisplayDebugEntry)
+                    DebugView = new DebugViewModel();
+                if (CustomLauncher.MenuDisplayCommunityEntry)
+                    CommunityView = new CommunityViewModel();
+                if (CustomLauncher.MenuDisplayNebulaLoginEntry)
+                    NebulaLoginVM = new NebulaLoginViewModel();
+                FillMenuItemsCustomMode(CustomLauncher.MenuTaskButtonAtTheEnd ? 0 : 1);
+                if(CustomLauncher.MenuTaskButtonAtTheEnd)
+                {
+                    //Fix the UI for task on the bottom
+                    TaskButtomRow = 1;
+                    ButtomListRow = 0;
+                    MainWindow.instance?.FixMarginButtomTasks();
+                }
+            }
             Knossos.StartUp(isQuickLaunch, forceUpdate);
+            CustomHomeVM?.CheckBasePath();
+        }
+
+        private void FillMenuItemsCustomMode(int defaultSelectedIndex)
+        {
+            Dispatcher.UIThread.Invoke(new Action(() => {
+
+                if (CustomLauncher.MenuTaskButtonAtTheEnd)
+                {
+                    MenuItems = new ObservableCollection<MainViewMenuItem>{
+                        new MainViewMenuItem(CustomHomeVM!, "avares://Knossos.NET/Assets/general/menu_home.png", "Home", "Home")
+                    };
+                }
+                else
+                {
+                    MenuItems = new ObservableCollection<MainViewMenuItem>{
+                        new MainViewMenuItem(TaskView, null, "Tasks", "Overview of current running tasks"),
+                        new MainViewMenuItem(CustomHomeVM!, "avares://Knossos.NET/Assets/general/menu_home.png", "Home", "Home")
+                    };
+                }
+
+                if (CustomLauncher.CustomMenuButtons != null && CustomLauncher.CustomMenuButtons.Any())
+                {
+                    foreach(var button in CustomLauncher.CustomMenuButtons)
+                    {
+                        try
+                        {
+                            switch (button.Type.ToLower())
+                            {
+                                case "htmlcontent" :
+                                    MenuItems.Add(new MainViewMenuItem(new HtmlContentViewModel(button.LinkURL), button.IconPath, button.Name, button.ToolTip));
+                                    break;
+                                case "axamlcontent":
+                                    MenuItems.Add(new MainViewMenuItem(new AxamlExternalContentViewModel(button.LinkURL, button.Name), button.IconPath, button.Name, button.ToolTip));
+                                    break;
+                                default:
+                                    throw new NotImplementedException("button type: "+ button.Type + " is not supported.");
+                            }
+                        }
+                        catch (Exception ex) 
+                        {
+                            Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.FillMenuItemsCustomMode()", ex);
+                        }
+                    }
+                }
+
+                if (CustomLauncher.MenuDisplayEngineEntry && FsoBuildsView != null)
+                {
+                    MenuItems.Add(new MainViewMenuItem(FsoBuildsView, "avares://Knossos.NET/Assets/general/menu_engine.png", "Engine", "Download new Freespace Open engine builds"));
+                }
+
+                if(CustomLauncher.MenuDisplayNebulaLoginEntry && NebulaLoginVM != null)
+                {
+                    MenuItems.Add(new MainViewMenuItem(NebulaLoginVM, "avares://Knossos.NET/Assets/general/menu_nebula.png", "Nebula", "Log in with your nebula account"));
+                }
+
+                if (CustomLauncher.MenuDisplayCommunityEntry && CommunityView != null)
+                {
+                    MenuItems.Add(new MainViewMenuItem(CommunityView!, "avares://Knossos.NET/Assets/general/menu_community.png", "Community", "FAQs and Community Resources"));
+                }
+
+                if (CustomLauncher.MenuDisplayGlobalSettingsEntry && GlobalSettingsView != null)
+                {
+                    MenuItems.Add(new MainViewMenuItem(GlobalSettingsView, "avares://Knossos.NET/Assets/general/menu_settings.png", "Settings", "Change launcher and FSO engine settings"));
+                }
+
+                if (CustomLauncher.MenuDisplayDebugEntry && DebugView != null)
+                {
+                    MenuItems.Add(new MainViewMenuItem(DebugView, "avares://Knossos.NET/Assets/general/menu_debug.png", "Debug", "Debug info"));
+                }
+
+                if (CustomLauncher.MenuTaskButtonAtTheEnd)
+                {
+                    MenuItems.Add(new MainViewMenuItem(TaskView, null, "Tasks", "Overview of current running tasks"));
+                }
+
+                if (MenuItems != null && MenuItems.Count() - 1 > defaultSelectedIndex)
+                {
+                    SelectedMenuItem = MenuItems[defaultSelectedIndex];
+                }
+            }));
+        }
+
+        private void FillMenuItemsNormalMode(int defaultSelectedIndex)
+        {
+            Dispatcher.UIThread.Invoke(new Action(() => { 
+                MenuItems = new ObservableCollection<MainViewMenuItem>{
+                    new MainViewMenuItem(TaskView, null, "Tasks", "Overview of current running tasks"),
+                    new MainViewMenuItem(InstalledModsView!, "avares://Knossos.NET/Assets/general/menu_play.png", "Play", "View and run installed Freepsace Open games and modifications"),
+                    new MainViewMenuItem(NebulaModsView!, "avares://Knossos.NET/Assets/general/menu_explore.png", "Explore", "Search and install Freespace Open games and modifications"),
+                    new MainViewMenuItem(FsoBuildsView!, "avares://Knossos.NET/Assets/general/menu_engine.png", "Engine", "Download new Freespace Open engine builds"),
+                    new MainViewMenuItem(DeveloperModView!, "avares://Knossos.NET/Assets/general/menu_develop.png", "Develop", "Develop new games and modifications for the Freespace Open Engine"),
+                    new MainViewMenuItem(CommunityView!, "avares://Knossos.NET/Assets/general/menu_community.png", "Community", "FAQs and Community Resources"),
+                    new MainViewMenuItem(PxoView!, "avares://Knossos.NET/Assets/general/menu_multiplayer.png", "Multiplayer", "View multiplayer games using PXO servers"),
+                    new MainViewMenuItem(GlobalSettingsView!, "avares://Knossos.NET/Assets/general/menu_settings.png", "Settings", "Change global Freespace Open and Knossos.NET settings"),
+                    new MainViewMenuItem(DebugView!, "avares://Knossos.NET/Assets/general/menu_debug.png", "Debug", "Debug info")
+                };
+                if (MenuItems != null && MenuItems.Count() - 1 > defaultSelectedIndex)
+                {
+                    SelectedMenuItem = MenuItems[defaultSelectedIndex];
+                }
+            }));
+        }
+
+        /// <summary>
+        /// When the user clicks a sidebar menu item this code is called
+        /// </summary>
+        /// <param name="value"></param>
+        partial void OnSelectedMenuItemChanged(MainViewMenuItem? value)
+        {
+            if (value != null)
+            {
+                // Things to do on tab exit
+                if (InstalledModsView != null && CurrentViewModel == InstalledModsView) //Exiting the Play tab.
+                {
+                    sharedSearch = InstalledModsView.Search;
+                }
+                if (NebulaModsView != null &&  CurrentViewModel == NebulaModsView) //Exiting the Nebula tab.
+                {
+                    sharedSearch = NebulaModsView.Search;
+                }
+                if(GlobalSettingsView != null &&  CurrentViewModel == GlobalSettingsView) //Exiting the settings view
+                {
+                    GlobalSettingsView.CommitPendingChanges();
+                }
+                if (CurrentViewModel != null && CurrentViewModel == CustomHomeVM) //CustomHomeView
+                {
+                    CustomHomeVM.TaskVM = null;
+                    TaskView?.ShowButtons(true);
+                    CustomHomeVM.ViewClosed();
+                }
+
+                CurrentViewModel = value.vm;
+
+                //Run code when entering a new view
+                if (CurrentViewModel == InstalledModsView) //Play Tab
+                {
+                    InstalledModsView.Search = sharedSearch;
+                    InstalledModsView.ChangeSort(sharedSortType);
+                }
+                if (CurrentViewModel == NebulaModsView) //Nebula Mods
+                {
+                    NebulaModsView.OpenTab(sharedSearch, sharedSortType);
+                }
+                if (CurrentViewModel == DeveloperModView) //Dev Tab
+                {
+                    DeveloperModsViewModel.Instance?.MaybeChangeSorting();
+                    DeveloperModView.UpdateBuildInstallButtons();
+                }
+                if (CurrentViewModel == CommunityView) //Community Tab
+                {
+                    Task.Run(async () => { await CommunityView.LoadFAQRepo(); });
+                }
+                if (CurrentViewModel == PxoView) //PXO
+                {
+                    PxoViewModel.Instance!.InitialLoad();
+                }
+                if (CurrentViewModel != null && CurrentViewModel == NebulaLoginVM) //Nebula Login (Single TC mode)
+                {
+                    NebulaLoginVM.UpdateUI();
+                }
+                if (CurrentViewModel != null && CurrentViewModel == CustomHomeVM) //CustomHomeView
+                {
+                    CustomHomeVM.TaskVM = TaskView;
+                    TaskView?.ShowButtons(false);
+                    CustomHomeVM.ViewOpened();
+                }
+                if (CurrentViewModel == GlobalSettingsView) //Settings
+                {
+                    if(Knossos.inSingleTCMode)
+                    {
+                        GlobalSettingsView?.CheckDisplaySettingsWarning();
+                    }
+                    Knossos.globalSettings.Load();
+                    GlobalSettingsView?.LoadData();
+                    //Knossos.globalSettings.EnableIniWatch();
+                    GlobalSettingsView?.UpdateImgCacheSize();
+                }
+                else
+                {
+                    //Knossos.globalSettings.DisableIniWatch();
+                }
+
+                //Custom Views
+                if (CurrentViewModel != null && CustomLauncher.IsCustomMode)
+                {
+                    if (CurrentViewModel.GetType() == typeof(HtmlContentViewModel))
+                    {
+                        ((HtmlContentViewModel)CurrentViewModel).Navigate();
+                    }
+                }
+            }
         }
 
         /* External Commands */
@@ -161,7 +359,7 @@ namespace Knossos.NET.ViewModels
         /// <param name="devmod"></param>
         public void AddDevMod(Mod devmod)
         {
-            DeveloperModView.AddMod(devmod);
+            DeveloperModView?.AddMod(devmod);
         }
 
         /// <summary>
@@ -169,7 +367,7 @@ namespace Knossos.NET.ViewModels
         /// </summary>
         public void RunModStatusChecks()
         {
-            InstalledModsView.RunModStatusChecks();
+            InstalledModsView?.RunModStatusChecks();
         }
 
         /// <summary>
@@ -188,9 +386,10 @@ namespace Knossos.NET.ViewModels
         /// </summary>
         /// <param name="id"></param>
         /// <param name="value"></param>
-        public void MarkAsUpdateAvailable(string id, bool value = true)
+        public void MarkAsUpdateAvailable(string id, bool value = true, string? newVersion = null)
         {
-            InstalledModsView.UpdateIsAvailable(id, value);
+            InstalledModsView?.UpdateIsAvailable(id, value);
+            CustomHomeVM?.UpdateIsAvailable(id, value, newVersion);
         }
 
         /// <summary>
@@ -199,7 +398,8 @@ namespace Knossos.NET.ViewModels
         /// <param name="modJson"></param>
         public void AddInstalledMod(Mod modJson)
         {
-            InstalledModsView.AddMod(modJson);
+            InstalledModsView?.AddMod(modJson);
+            CustomHomeVM?.AddModVersion(modJson);
         }
 
         /// <summary>
@@ -222,7 +422,8 @@ namespace Knossos.NET.ViewModels
         /// <param name="modJson"></param>
         public void AddNebulaMod(Mod modJson)
         {
-            NebulaModsView.AddMod(modJson);
+            NebulaModsView?.AddMod(modJson);
+            CustomHomeVM?.AddNebulaModVersion(modJson);
         }
 
         /// <summary>
@@ -233,8 +434,16 @@ namespace Knossos.NET.ViewModels
         public void BulkLoadNebulaMods(List<Mod> mods, bool clear)
         {
             if(clear)
-                NebulaModsView.ClearView();
-            NebulaModsView.AddMods(mods);
+                NebulaModsView?.ClearView();
+            NebulaModsView?.AddMods(mods);
+            if (CustomLauncher.IsCustomMode)
+            {
+                foreach (var item in mods)
+                {
+                    if(item.id == CustomLauncher.ModID)
+                        CustomHomeVM?.AddNebulaModVersion(item);
+                }
+            }
         }
 
         /// <summary>
@@ -243,7 +452,8 @@ namespace Knossos.NET.ViewModels
         /// <param name="id"></param>
         public void CancelModInstall(string id)
         {
-            NebulaModsView.CancelModInstall(id);
+            NebulaModsView?.CancelModInstall(id);
+            CustomHomeVM?.CancelModInstall(id);
         }
 
         /// <summary>
@@ -252,7 +462,8 @@ namespace Knossos.NET.ViewModels
         /// <param name="id"></param>
         public void RemoveInstalledMod(string id)
         {
-            InstalledModsView.RemoveMod(id);
+            InstalledModsView?.RemoveMod(id);
+            CustomHomeVM?.RemoveMod(id);
         }
 
         /// <summary>
@@ -261,7 +472,8 @@ namespace Knossos.NET.ViewModels
         /// <param name="mod"></param>
         public void RemoveInstalledModVersion(Mod mod)
         {
-            InstalledModsView.RemoveModVersion(mod);
+            InstalledModsView?.RemoveModVersion(mod);
+            CustomHomeVM?.RemoveInstalledModVersion(mod);
         }
 
         /// <summary>
@@ -269,7 +481,23 @@ namespace Knossos.NET.ViewModels
         /// </summary>
         public void GlobalSettingsLoadData()
         {
-            GlobalSettingsView.LoadData();
+            GlobalSettingsView?.LoadData();
+        }
+
+        internal void ApplySettings()
+        {
+            Dispatcher.UIThread.Invoke(() => {
+                IsMenuOpen = Knossos.globalSettings.mainMenuOpen;
+                sharedSortType = Knossos.globalSettings.sortType;
+                InstalledModsView?.ChangeSort(sharedSortType);
+                if(NebulaModsView != null)
+                    NebulaModsView.sortType = sharedSortType;
+            });
+        }
+
+        public void UpdateBuildInstallButtons(){
+            DeveloperModView?.UpdateBuildNames(LatestStable, LatestNightly);
+            QuickSetupViewModel.Instance?.UpdateBuildName(LatestStable);
         }
 
         /// <summary>
@@ -278,177 +506,7 @@ namespace Knossos.NET.ViewModels
         /// <param name="message"></param>
         public void WriteToUIConsole(string message)
         {
-            UiConsoleOutput += "\n"+ message;
-        }
-
-        /* Debug Section */
-        internal void OpenLog()
-        {
-            if (File.Exists(KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar + "Knossos.log"))
-            {
-                try
-                {
-                    var cmd = new Process();
-                    cmd.StartInfo.FileName = KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar + "Knossos.log";
-                    cmd.StartInfo.UseShellExecute = true;
-                    cmd.Start();
-                    cmd.Dispose();
-                }
-                catch (Exception ex) 
-                {
-                    Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.ReloadLog",ex);
-                }
-            }
-            else
-            {
-                if(MainWindow.instance != null)
-                    MessageBox.Show(MainWindow.instance, "Log File " + KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar + "Knossos.log not found.","File not found",MessageBox.MessageBoxButtons.OK);
-            }
-        }
-
-        internal void OpenSettings()
-        {
-            if (File.Exists(KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar + "settings.json"))
-            {
-                try
-                {
-                    var cmd = new Process();
-                    cmd.StartInfo.FileName = KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar +"settings.json";
-                    cmd.StartInfo.UseShellExecute = true;
-                    cmd.Start();
-                    cmd.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.ReloadLog", ex);
-                }
-            }
-            else
-            {
-                if (MainWindow.instance != null)
-                    MessageBox.Show(MainWindow.instance, "Log File " + KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar + "settings.json not found.", "File not found", MessageBox.MessageBoxButtons.OK);
-            }
-        }
-
-        internal void OpenFS2Log()
-        {
-            if (File.Exists(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "data" + Path.DirectorySeparatorChar + "fs2_open.log"))
-            {
-                try
-                {
-                    var cmd = new Process();
-                    cmd.StartInfo.FileName = KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "data"+ Path.DirectorySeparatorChar + "fs2_open.log";
-                    cmd.StartInfo.UseShellExecute = true;
-                    cmd.Start();
-                    cmd.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.ReloadFS2Log", ex);
-                }
-            }
-            else
-            {
-                if (MainWindow.instance != null)
-                    MessageBox.Show(MainWindow.instance, "Log File " + KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar+ "data"+ Path.DirectorySeparatorChar+"fs2_open.log not found.", "File not found", MessageBox.MessageBoxButtons.OK);
-            }
-        }
-
-        internal void OpenFS2Ini()
-        {
-            if (File.Exists(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar+ "fs2_open.ini"))
-            {
-                try
-                {
-                    var cmd = new Process();
-                    cmd.StartInfo.FileName = KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "fs2_open.ini";
-                    cmd.StartInfo.UseShellExecute = true;
-                    cmd.Start();
-                    cmd.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.ReloadFS2ini", ex);
-                }
-            }
-            else
-            {
-                if (MainWindow.instance != null)
-                    MessageBox.Show(MainWindow.instance, "Log File " + KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "fs2_open.ini not found.", "File not found", MessageBox.MessageBoxButtons.OK);
-            }
-        }
-
-        internal async void UploadFS2Log()
-        {
-            if (File.Exists(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "data" + Path.DirectorySeparatorChar + "fs2_open.log"))
-            {
-                try
-                {
-                    var logString = File.ReadAllText(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "data" + Path.DirectorySeparatorChar + "fs2_open.log",System.Text.Encoding.UTF8);
-                    if(logString.Trim() != string.Empty)
-                    {
-                        var status = await Nebula.UploadLog(logString);
-                        if(!status)
-                        {
-                            if (MainWindow.instance != null)
-                                await MessageBox.Show(MainWindow.instance, "An error has ocurred while uploading the log file, check the log below.", "Upload log error", MessageBox.MessageBoxButtons.OK);
-                        }
-                    }
-                    else
-                    {
-                        if (MainWindow.instance != null)
-                            await MessageBox.Show(MainWindow.instance, "The log file is empty.", "Error", MessageBox.MessageBoxButtons.OK);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.UploadFS2Log", ex);
-                }
-            }
-            else
-            {
-                if (MainWindow.instance != null)
-                    await MessageBox.Show(MainWindow.instance, "Log File " + KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "data" + Path.DirectorySeparatorChar + "fs2_open.log not found.", "File not found", MessageBox.MessageBoxButtons.OK);
-            }
-        }
-        internal async void UploadKnossosConsole()
-        {
-            try
-            {
-                var status = await Nebula.UploadLog(UiConsoleOutput);
-                if (!status)
-                {
-                    if (MainWindow.instance != null)
-                        await MessageBox.Show(MainWindow.instance, "An error has ocurred while uploading the console output, check the log below.", "Upload error", MessageBox.MessageBoxButtons.OK);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.UploadKnossosConsole", ex);
-            }
-        }
-
-        /// <summary>
-        /// Open Debug Filter Dialog
-        /// </summary>
-        internal async void OpenDebugFilterView()
-        {
-            var dialog = new Views.DebugFiltersView();
-            dialog.DataContext = new DebugFiltersViewModel();
-            await dialog.ShowDialog<DebugFiltersView?>(MainWindow.instance!);
-        }
-
-        internal void applySettingsToList()
-        {
-            if (InstalledModsView != null)
-            {
-                InstalledModsView.ChangeSort(sharedSortType);
-            }
-        }
-
-        public void UpdateBuildInstallButtons(){
-            DeveloperModView?.UpdateBuildNames(LatestStable, LatestNightly);
-            QuickSetupViewModel.Instance?.UpdateBuildName(LatestStable);
+            DebugView?.WriteToUIConsole(message);
         }
 
         /// <summary>
@@ -458,12 +516,29 @@ namespace Knossos.NET.ViewModels
         {
             try
             {
-                KnUtils.OpenFolder(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "screenshots");
+                var path = Path.Combine(KnUtils.GetFSODataFolderPath(), "screenshots");
+                Directory.CreateDirectory(path);
+                KnUtils.OpenFolder(path);
             }
             catch (Exception ex)
             {
                 Log.Add(Log.LogSeverity.Error, "MainWindowViewModel.OpenScreenshotsFolder", ex);
             }
+        }
+
+        internal void TriggerMenuCommand()
+        {
+            IsMenuOpen = !IsMenuOpen;
+            Knossos.globalSettings.mainMenuOpen = IsMenuOpen;
+        }
+
+        /// <summary>
+        /// Sets a mod id as "installing" so the proper info can be displayed on the UI
+        /// </summary>
+        public void SetInstalling(string id, CancellationTokenSource cancelToken)
+        {
+            NebulaModsView?.SetInstalling(id, cancelToken);
+            CustomHomeVM?.SetInstalling(id, cancelToken);
         }
     }
 }

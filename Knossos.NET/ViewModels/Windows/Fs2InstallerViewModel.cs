@@ -57,7 +57,7 @@ namespace Knossos.NET.ViewModels
 
         public Fs2InstallerViewModel() 
         { 
-            if(KnUtils.IsWindows || KnUtils.IsMacOS || KnUtils.IsLinux && ( KnUtils.CpuArch == "X64" || KnUtils.CpuArch == "X86" || KnUtils.CpuArch == "Arm64"))
+            if(KnUtils.IsWindows || KnUtils.IsMacOS || KnUtils.IsLinux && ( KnUtils.CpuArch == "X64" || KnUtils.CpuArch == "X86" || KnUtils.CpuArch == "Arm64" || KnUtils.CpuArch == "RiscV64"))
             {
                 InnoExtractIsAvailable = true;
             }
@@ -70,7 +70,7 @@ namespace Knossos.NET.ViewModels
         {
             if(Knossos.GetKnossosLibraryPath() == null)
             {
-                await MessageBox.Show(MainWindow.instance!, "The Knossos library path is not set, first set the library path in the settings tab before installing FS2 Retail.", "Library path is null", MessageBox.MessageBoxButtons.OK);
+                await MessageBox.Show(MainWindow.instance!, "The KnossosNET library path is not set, first set the library path in the settings tab before installing FS2 Retail.", "Library path is null", MessageBox.MessageBoxButtons.OK);
                 return;
             }
             
@@ -101,6 +101,10 @@ namespace Knossos.NET.ViewModels
                             if (KnUtils.CpuArch == "Arm64")
                             {
                                 innoPath += "innoextract.arm64";
+                            }
+                            if (KnUtils.CpuArch == "RiscV64")
+                            {
+                                innoPath += "innoextract.riscv64";
                             }
                         }
                         else
@@ -306,7 +310,7 @@ namespace Knossos.NET.ViewModels
                         }
                     }
                     catch { }
-                    InstallText = "Install Complete!, Knossos is reloading the library...";
+                    InstallText = "Install Complete!, KnossosNET is reloading the library...";
                     Knossos.ResetBasePath();
                     if(gogExe != null)
                     {
@@ -378,6 +382,16 @@ namespace Knossos.NET.ViewModels
                                 using (var fileStream = File.Create(innoPath))
                                 {
                                     AssetLoader.Open(new Uri("avares://Knossos.NET/Assets/utils/linux-arm64/innoextract.arm64")).CopyTo(fileStream);
+                                    fileStream.Close();
+                                    KnUtils.Chmod(innoPath, "+x");
+                                }
+                            }
+                            if (KnUtils.CpuArch == "RiscV64")
+                            {
+                                innoPath += "innoextract.riscv64";
+                                using (var fileStream = File.Create(innoPath))
+                                {
+                                    AssetLoader.Open(new Uri("avares://Knossos.NET/Assets/utils/linux-riscv64/innoextract.riscv64")).CopyTo(fileStream);
                                     fileStream.Close();
                                     KnUtils.Chmod(innoPath, "+x");
                                 }

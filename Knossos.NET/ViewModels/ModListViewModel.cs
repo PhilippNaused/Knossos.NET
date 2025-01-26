@@ -134,6 +134,10 @@ namespace Knossos.NET.ViewModels
 
                 if (newSort != sortType)
                 {
+                    if (MainWindowViewModel.Instance != null && newSort != MainWindowViewModel.SortType.unsorted  && MainWindowViewModel.Instance.sharedSortType != newSort )
+                    {
+                        MainWindowViewModel.Instance.sharedSortType = newSort;
+                    }
                     LoadingAnimation.Animate = 1;
                     Sorting = true;
                     Dispatcher.UIThread.Invoke( () =>
@@ -177,7 +181,7 @@ namespace Knossos.NET.ViewModels
                 switch (sortType)
                 {
                     case MainWindowViewModel.SortType.name:
-                        return String.Compare(modA.title, modB.title);
+                        return Mod.CompareTitles(modA.title, modB.title);
                     case MainWindowViewModel.SortType.release:
                         if (modA.firstRelease == modB.firstRelease)
                             return 0;

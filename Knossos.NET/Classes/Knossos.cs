@@ -16,7 +16,7 @@ namespace Knossos.NET
 {
     public static class Knossos
     {
-        public static readonly string AppVersion = "1.2.3";
+        public static readonly string AppVersion = "1.3.0-Alpha";
         public readonly static string ToolRepoURL = "https://raw.githubusercontent.com/KnossosNET/Knet-Tool-Repo/main/knet_tools.json";
         public readonly static string GitHubUpdateRepoURL = "https://api.github.com/repos/KnossosNET/Knossos.NET";
         public readonly static string FAQURL = "https://raw.githubusercontent.com/KnossosNET/KNet-General-Resources-Repo/main/communityfaq.json";
@@ -29,6 +29,36 @@ namespace Knossos.NET
         public static bool flagDataLoaded = false;
         private static object? ttsObject = null;
         private static bool forceUpdateDownload = false; //Only intended to test the update system!
+        public static bool inPortableMode { get; private set; } = false;
+        public static bool isKnDataFolderReadOnly { get; private set; } = false;
+        public static bool inSingleTCMode { get; private set; } = false;
+
+        /// <summary>
+        /// Static constructor
+        /// </summary>
+        static Knossos()
+        {
+            try
+            {
+                //We are in portable mode? if so set everything up ahead of all else
+                var pathToExec = KnUtils.KnetFolderPath;
+                if (pathToExec != null)
+                {
+                    if (Directory.Exists(Path.Combine(pathToExec, "kn_portable")))
+                    {
+                        inPortableMode = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                //At this stage we can only log to console
+                Log.WriteToConsole("Knossos() - " + ex.Message);
+            }
+            //Important!!! The first time it needs to be ran after checking if we are in portable mode or not
+            //Due to the Knossos data folder path changing
+            inSingleTCMode = CustomLauncher.IsCustomMode;
+        }
 
         /// <summary>
         /// StartUp sequence
@@ -58,24 +88,50 @@ namespace Knossos.NET
                 }
                 catch (Exception ex)
                 {
+                    isKnDataFolderReadOnly = true;
                     Log.Add(Log.LogSeverity.Error, "Knossos.StartUp()", ex);
                     if (MainWindow.instance != null)
                     {
-                        await MessageBox.Show(MainWindow.instance, "Unable to write to KnossosNET data folder.", "KnossosNET Error", MessageBox.MessageBoxButtons.OK);
+                        await MessageBox.Show(MainWindow.instance, "Unable to write to KnossosNET data folder:\n'"+ KnUtils.GetKnossosDataFolderPath()+"'\nSome functions may not work correctly.", "KnossosNET Error", MessageBox.MessageBoxButtons.OK);
                     }
                 }
 
+                //Rename the old cache folder
+                try
+                {
+                    var oldCachePath = Path.Combine(KnUtils.GetKnossosDataFolderPath(), "image_cache");
+                    if (!Directory.Exists(KnUtils.GetCachePath()) && Directory.Exists(oldCachePath))
+                    {
+                        Directory.Move(oldCachePath, KnUtils.GetCachePath());
+                    }
+                }
+                catch(Exception ex) 
+                {
+                    Log.Add(Log.LogSeverity.Error, "Knossos.Startup()", ex);
+                }
+
                 Log.Add(Log.LogSeverity.Information, "Knossos.StartUp()", "=== KnossosNET v" + AppVersion + " Start ===");
+
+                if (inPortableMode)
+                {
+                    Log.Add(Log.LogSeverity.Information, "Knossos.StartUp()", "Running in PORTABLE MODE.");
+                    try
+                    {
+                        Directory.CreateDirectory(KnUtils.GetFSODataFolderPath());
+                        Directory.CreateDirectory(Path.Combine(KnUtils.KnetFolderPath!, "kn_portable", "Library"));
+                    }
+                    catch (Exception ex) 
+                    {
+                        Log.Add(Log.LogSeverity.Error, "Knossos.Startup()", ex);
+                    }
+                }
 
                 //Load language files
                 Lang.LoadFiles();
 
                 //Load knossos config
                 globalSettings.Load();
-                
-                if (MainWindowViewModel.Instance != null){
-                    MainWindowViewModel.Instance.applySettingsToList();
-                }
+                MainWindowViewModel.Instance?.ApplySettings();
 
 
                 //Print Decompressor Type
@@ -97,14 +153,14 @@ namespace Knossos.NET
                 }
 
                 //Load base path from knossos legacy
-                if (globalSettings.basePath == null)
+                if (globalSettings.basePath == null && !inSingleTCMode)
                 {
                     globalSettings.basePath = KnUtils.GetBasePathFromKnossosLegacy();
                 }
 
                 LoadBasePath(isQuickLaunch);
 
-                if (globalSettings.basePath == null && !isQuickLaunch)
+                if (globalSettings.basePath == null && !isQuickLaunch && !inSingleTCMode)
                     OpenQuickSetup();
 
             }catch(Exception ex)
@@ -153,13 +209,20 @@ namespace Knossos.NET
             string modid = string.Empty;
             string modver = string.Empty;
             string modExecType = string.Empty;
+            string toolName = string.Empty;
             bool saveID = false;
             bool saveVer = false;
             bool saveExecType = false;
+            bool toolID = false;
 
             foreach (var arg in args)
             {
                 Log.Add(Log.LogSeverity.Information, "Knossos.StartUp", "Knet Cmdline Arg: " + arg);
+                if (toolID)
+                {
+                    toolID = false;
+                    toolName = arg;
+                }
                 if (saveID)
                 {
                     saveID = false;
@@ -179,6 +242,10 @@ namespace Knossos.NET
                 {
                     saveID = true;
                 }
+                if (arg.ToLower() == "-tool")
+                {
+                    toolID = true;
+                }
                 if (arg.ToLower() == "-version")
                 {
                     saveVer = true;
@@ -186,6 +253,26 @@ namespace Knossos.NET
                 if (arg.ToLower() == "-exec")
                 {
                     saveExecType = true;
+                }
+            }
+
+            if (toolName != string.Empty)
+            {
+                var tool = GetTools().FirstOrDefault(x=> x.name.ToLower() == toolName.ToLower());
+                try
+                {
+                    if (tool != null)
+                    {
+                        _ = tool.Open();
+                    }
+                    else
+                    {
+                        Log.Add(Log.LogSeverity.Error, "Knossos.QuickLaunch", "Quick launch was used but the tool was not found. Used tool name: " + toolName);
+                    }
+                }
+                catch(Exception ex) 
+                {
+                    Log.Add(Log.LogSeverity.Error, "Knossos.QuickLaunch", ex);
                 }
             }
 
@@ -251,10 +338,13 @@ namespace Knossos.NET
                 Log.Add(Log.LogSeverity.Error, "Knossos.QuickLaunch", "Quick launch was used but the modid was not detected.");
             }
             await Task.Delay(2000);
-            Dispatcher.UIThread.Invoke(() =>
+            if (MainWindow.instance != null)
             {
-                MainWindow.instance!.Close();
-            });
+                Dispatcher.UIThread.Invoke(() =>
+                {
+                    MainWindow.instance.Close();
+                });
+            }
         }
 
         /// <summary>
@@ -281,6 +371,11 @@ namespace Knossos.NET
                                     if (a.name != null)
                                     {
                                         if ((KnUtils.CpuArch.ToLower() == "x64" && a.name.EndsWith("x86_64.AppImage")) || (KnUtils.CpuArch.ToLower() == "arm64" && a.name.EndsWith("aarch64.AppImage")))
+                                        {
+                                            releaseAsset = a;
+                                            break;
+                                        }
+                                        if ((KnUtils.CpuArch.ToLower() == "riscv32" && a.name.EndsWith("riscv32.AppImage")) || (KnUtils.CpuArch.ToLower() == "riscv64" && a.name.EndsWith("riscv64.AppImage")))
                                         {
                                             releaseAsset = a;
                                             break;
@@ -555,9 +650,9 @@ namespace Knossos.NET
                 }
                 else
                 {
-                    Log.Add(Log.LogSeverity.Error, "Knossos.CheckKnetUpdates()", "Get latest version from github resulted in null or tag_name being null.");
+                    Log.Add(Log.LogSeverity.Error, "Knossos.CheckKnetUpdates()", "Get latest version from GitHub resulted in null or tag_name being null.");
                     if (forceUpdateDownload)
-                        Console.WriteLine("Update Error! Get latest version from github resulted in null or tag_name being null.");
+                        Console.WriteLine("Update Error! Get latest version from GitHub resulted in null or tag_name being null.");
                 }
             }
             catch (Exception ex)
@@ -736,9 +831,9 @@ namespace Knossos.NET
         /// <param name="fsoExecType"></param>
         /// <param name="standaloneServer"></param>
         /// <param name="standalonePort"></param>
-        public static async void PlayMod(Mod mod, FsoExecType fsoExecType, bool standaloneServer = false, int standalonePort = 0)
+        public static async void PlayMod(Mod mod, FsoExecType fsoExecType, bool standaloneServer = false, int standalonePort = 0, bool vrMode = false)
         {
-            if (TaskViewModel.Instance!.IsSafeState() == false)
+            if (TaskViewModel.Instance?.IsSafeState() == false)
             {
                 var result = await MessageBox.Show(MainWindow.instance!, "Other important tasks are running, it is recommended that you wait until they finish before launching the game because it may cause them to fail.\nIf you are absolutely sure those tasks cannot interfere you can continue.", "Tasks are running", MessageBox.MessageBoxButtons.ContinueCancel);
                 if(result != MessageBox.MessageBoxResult.Continue)
@@ -799,6 +894,12 @@ namespace Knossos.NET
             var modList = new List<Mod>();
             FsoBuild? fsoBuild = null;
 
+            /* VR Mode Stuff */
+            if(vrMode)
+            {
+                cmdline += " -vr";
+            }
+
             /* Resolve Dependencies should be all valid at this point */
             var dependencyList = mod.GetModDependencyList(false,true);
             bool hasBuildDependency = false;
@@ -829,7 +930,7 @@ namespace Knossos.NET
                 var queryConflict = dependencyList.GroupBy(x => x.id).Where(g => g.Count() > 1).ToList();
                 if (queryConflict.Count() > 0)
                 {
-                    var outputString = "There is a dependency conflict for this mod: " + mod + " Knet will try to adjust but the mod may present issues or not work at all. \nThis may be be resolved manually using custom dependencies for this mod.\n";
+                    var outputString = "There is a dependency conflict for this mod: " + mod + " KnossosNET will try to adjust but the mod may present issues or not work at all. \nThis may be be resolved manually using custom dependencies for this mod.\n";
                     foreach (var conflictGroup in queryConflict)
                     {
                         foreach (var conflictDep in conflictGroup)
@@ -1062,15 +1163,17 @@ namespace Knossos.NET
             if (fsoBuild == null)
             {
                 Log.Add(Log.LogSeverity.Error, "Knossos.PlayMod()", "Unable to find a valid FSO build for this mod!");
-                if(hasBuildDependency)
+                if (MainWindow.instance != null)
                 {
-                    await MessageBox.Show(MainWindow.instance!, "Unable to find a valid FSO build for this mod!", "Error launching mod", MessageBox.MessageBoxButtons.OK);
+                    if (hasBuildDependency)
+                    {
+                        await MessageBox.Show(MainWindow.instance!, "Unable to find a valid FSO build for this mod!", "Error launching mod", MessageBox.MessageBoxButtons.OK);
+                    }
+                    else
+                    {
+                        await MessageBox.Show(MainWindow.instance!, "This mod does not specify an engine build to use, you should select one in the mod settings.", "Error launching mod", MessageBox.MessageBoxButtons.OK);
+                    }
                 }
-                else
-                {
-                    await MessageBox.Show(MainWindow.instance!, "This mod does not especifies a engine build to use, you should select one in the mod settings.", "Error launching mod", MessageBox.MessageBoxButtons.OK);
-                }
-
                 return;
             }
             else
@@ -1082,9 +1185,12 @@ namespace Knossos.NET
                     {
                         if (mod.modSettings.isCompressed)
                         {
-                            var result = await MessageBox.Show(MainWindow.instance!, "This mod currently resolves to FSO build: " + fsoBuild.version + " and it is compressed, the minimum to fully support all compression features is: " + VPCompression.MinimumFSOVersion + ".\n23.0.0 may work if the mod do not have loose files, older versions are not going to work. Use a newer FSO version or uncompress this mod.", "FSO Version below minimum for compression", MessageBox.MessageBoxButtons.ContinueCancel);
-                            if (result != MessageBox.MessageBoxResult.Continue)
-                                return;
+                            if (MainWindow.instance != null)
+                            {
+                                var result = await MessageBox.Show(MainWindow.instance!, "This mod currently resolves to FSO build: " + fsoBuild.version + " and it is compressed, the minimum to fully support all compression features is: " + VPCompression.MinimumFSOVersion + ".\n23.0.0 may work if the mod do not have loose files, older versions are not going to work. Use a newer FSO version or uncompress this mod.", "FSO Version below minimum for compression", MessageBox.MessageBoxButtons.ContinueCancel);
+                                if (result != MessageBox.MessageBoxResult.Continue)
+                                    return;
+                            }
                         }
                         else
                         {
@@ -1111,9 +1217,12 @@ namespace Knossos.NET
                             }
                             if (compressedMods != string.Empty)
                             {
-                                var result = await MessageBox.Show(MainWindow.instance!, "This mod currently resolves to FSO build: " + fsoBuild.version + " and depends on mods: " + compressedMods + " that are currently compressed, the minimum to fully support all compression features is: " + VPCompression.MinimumFSOVersion + ".\n23.0.0 may work if the mod do not have loose files, older versions are not going to work. Use a newer FSO version or uncompress those mods.", "FSO Version below minimum for compression", MessageBox.MessageBoxButtons.ContinueCancel);
-                                if (result != MessageBox.MessageBoxResult.Continue)
-                                    return;
+                                if (MainWindow.instance != null)
+                                {
+                                    var result = await MessageBox.Show(MainWindow.instance!, "This mod currently resolves to FSO build: " + fsoBuild.version + " and depends on mods: " + compressedMods + " that are currently compressed, the minimum to fully support all compression features is: " + VPCompression.MinimumFSOVersion + ".\n23.0.0 may work if the mod do not have loose files, older versions are not going to work. Use a newer FSO version or uncompress those mods.", "FSO Version below minimum for compression", MessageBox.MessageBoxButtons.ContinueCancel);
+                                    if (result != MessageBox.MessageBoxResult.Continue)
+                                        return;
+                                }
                             }
                         }
                     }
@@ -1145,6 +1254,10 @@ namespace Knossos.NET
                     cmdline = KnUtils.CmdLineBuilder(cmdline, globalCmd);
                 }
                 cmdline = KnUtils.CmdLineBuilder(cmdline, modCmd?.ToArray());
+                if (inSingleTCMode && CustomLauncher.CustomCmdlineArray != null && CustomLauncher.CustomCmdlineArray.Any())
+                {
+                    cmdline = KnUtils.CmdLineBuilder(cmdline, CustomLauncher.CustomCmdlineArray);
+                }
             }
             else
             {
@@ -1158,6 +1271,62 @@ namespace Knossos.NET
             if (modFlag.Length > 0)
             {
                 cmdline += " -mod " + modFlag;
+            }
+
+            
+
+            if (MainWindow.instance != null && globalSettings.warnNewSettingsSystem)
+            {
+                try
+                {
+                    var fsoVersion = new SemanticVersion(fsoBuild.version);
+                    var newSettingsVersion = new SemanticVersion("24.2.0-RC");
+                    if(fsoVersion >= newSettingsVersion)
+                    {
+                        await Dispatcher.UIThread.InvokeAsync(async () => {
+                            try
+                            {
+                                var res = await MessageBox.Show(MainWindow.instance, "Starting from FSO version 24.2.0 a new in-game settings system was implemented.\n" +
+                                    "Launcher settings, such as video, audio or input, and Command Line arguments of those categories no longer have an effect by default.\n" +
+                                    "Settings for most mods using FSO version 24.2.0 or higher must be now changed in-game by going to the 'Options' menu, where you will see additional methods for accessing and setting these new in-game options.", "New FSO settings system", MessageBox.MessageBoxButtons.DontWarnAgainOK);
+
+                                if (res == MessageBox.MessageBoxResult.DontWarnAgain)
+                                {
+                                    globalSettings.warnNewSettingsSystem = false;
+                                    globalSettings.Save();
+                                }
+                            }
+                            catch
+                            {
+                                //fail silently, this is not important
+                            }
+                        });
+                    }
+                }
+                catch 
+                {
+                    //fail silently, this is not important
+                }
+            }
+
+            //Portable mode and limitations in unsupported fso versions
+            if (inPortableMode && globalSettings.portableFsoPreferences)
+            {
+                try
+                {
+                    var fsoVersion = new SemanticVersion(fsoBuild.version);
+                    var newPortableModeVersion = new SemanticVersion("24.3.0-20241211");
+                    if (fsoVersion < newPortableModeVersion)
+                    {
+                        cmdline = "-portable_mode " + cmdline;
+                        //older portable mode uses working path to pickup the .ini and store pilots
+                        globalSettings.WriteFS2IniValues(Path.Combine(rootPath, "fs2_open.ini"));
+                    }
+                }
+                catch(Exception ex)
+                {
+                    Log.Add(Log.LogSeverity.Error, "Knossos.PlayMod()", ex);
+                }
             }
 
             Log.Add(Log.LogSeverity.Information, "Knossos.PlayMod()", "Used cmdLine : " + cmdline);
@@ -1308,9 +1477,9 @@ namespace Knossos.NET
                                     await Dispatcher.UIThread.InvokeAsync(() => FsoBuildsViewModel.Instance?.AddBuildToUi(build), DispatcherPriority.Background);
                                 break;
                         }
-                        if(modJson.devMode)
+                        if(modJson.devMode && !isQuickLaunch)
                         {
-                            await Dispatcher.UIThread.InvokeAsync(() => MainWindowViewModel.Instance!.AddDevMod(modJson), DispatcherPriority.Background);
+                            await Dispatcher.UIThread.InvokeAsync(() => MainWindowViewModel.Instance?.AddDevMod(modJson), DispatcherPriority.Background);
                         }
                     }
                     catch (Exception ex)

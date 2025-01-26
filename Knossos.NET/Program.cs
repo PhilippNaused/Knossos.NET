@@ -12,33 +12,46 @@ namespace Knossos.NET
         [STAThread]
         public static void Main(string[] args)
         {
-            bool softwareRendering = false;
+            bool softwareRendering = true;
+            bool isQuickLaunch = false;
 
             //Check app args
             foreach (var arg in args)
             {
-                if (arg.ToLower() == "-software")
+                if (arg.ToLower() == "-hardware")
                 {
-                    softwareRendering = true;
+                    softwareRendering = false;
+                }
+                if (arg.ToLower() == "-playmod" || arg.ToLower() ==  "-tool")
+                {
+                    isQuickLaunch = true;
                 }
             }
 
-            //Check enviroment variables
-            var renderMode = KnUtils.GetEnvironmentVariable("KNET_RENDER_MODE");
 
-            if (renderMode != null && renderMode.ToLower() == "software")
+            if (isQuickLaunch)
             {
-                softwareRendering = true;
-            }
-
-            //Start App
-            if (softwareRendering)
-            {
-                BuildAvaloniaAppSoftware().StartWithClassicDesktopLifetime(args);
+                Knossos.StartUp(true, false);
             }
             else
             {
-                BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+                //Check enviroment variables
+                var renderMode = KnUtils.GetEnvironmentVariable("KNET_RENDER_MODE");
+
+                if (renderMode != null && renderMode.ToLower() == "hardware")
+                {
+                    softwareRendering = false;
+                }
+
+                //Start App
+                if (softwareRendering)
+                {
+                    BuildAvaloniaAppSoftware().StartWithClassicDesktopLifetime(args);
+                }
+                else
+                {
+                    BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+                }
             }
         }
 

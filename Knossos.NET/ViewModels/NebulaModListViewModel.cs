@@ -283,6 +283,10 @@ namespace Knossos.NET.ViewModels
 
                 if (newSort != sortType)
                 {
+                    if (MainWindowViewModel.Instance != null && newSort != MainWindowViewModel.SortType.unsorted && MainWindowViewModel.Instance.sharedSortType != newSort)
+                    {
+                        MainWindowViewModel.Instance.sharedSortType = newSort;
+                    }
                     if (sortType != MainWindowViewModel.SortType.unsorted)
                     {
                         sorting = true;
@@ -327,7 +331,7 @@ namespace Knossos.NET.ViewModels
                 switch (sortType)
                 {
                     case MainWindowViewModel.SortType.name:
-                        return String.Compare(modA.title, modB.title);
+                        return Mod.CompareTitles(modA.title, modB.title);
                     case MainWindowViewModel.SortType.release:
                         if (modA.firstRelease == modB.firstRelease)
                             return 0;
@@ -370,7 +374,7 @@ namespace Knossos.NET.ViewModels
                 return 0; 
             }
         }
-        
+
         /// <summary>
         /// Changes a modcard to "installing" mode
         /// </summary>

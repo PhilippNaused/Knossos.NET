@@ -46,18 +46,21 @@ namespace Knossos.NET
             string logString = $"{DateTime.Now:s} {logSeverity.ToLogString()} [{from}] - {data}";
             if (Knossos.globalSettings.enableLogFile && (int)logSeverity >= Knossos.globalSettings.logLevel )
             {
-                Task.Run(async () =>
-                {
-                    for (int i = 0; i < 10; i++)
+                Task.Run(async () => {
+                    try
                     {
-                        try
+                        if (!Knossos.isKnDataFolderReadOnly)
                         {
-                            await File.AppendAllTextAsync(LogFilePath, logString + Environment.NewLine, Encoding.UTF8);
-                            return;
+                            await WaitForFileAccess(LogFilePath);
+                            using (var writer = new StreamWriter(LogFilePath, true))
+                            {
+                                writer.WriteLine(logString, Encoding.UTF8);
+                            }
                         }
-                        catch
-                        {
-                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        WriteToConsole(ex.Message);
                     }
                 });
             }

@@ -118,6 +118,60 @@ namespace Knossos.NET.Models
         public int devModSort { get; set; } = 0;
         [JsonPropertyName("auto_update_fso_builds")]
         public AutoUpdateFsoBuilds autoUpdateBuilds { get; set; } = new AutoUpdateFsoBuilds();
+        [JsonPropertyName("warn_new_settings_system")]
+        public bool warnNewSettingsSystem { get; set; } = true;
+
+        /* 
+         * Settings that can wait to be saved at app close so we dont have to call save() all the time
+         * use JsonIgnore, private and '_' for the actual variable name
+        */
+        [JsonIgnore]
+        private bool pendingChangesOnAppClose { get; set; } = false;
+
+        [JsonIgnore]
+        private bool _mainMenuOpen = true;
+        [JsonPropertyName("main_menu_open")]
+        public bool mainMenuOpen
+        {
+            get {  return _mainMenuOpen; }
+            set { if ( _mainMenuOpen != value ) { _mainMenuOpen = value; pendingChangesOnAppClose = true; } }
+        }
+
+        [JsonIgnore]
+        private bool _hideBuildRC = true;
+        [JsonPropertyName("hide_build_rc")]
+        public bool hideBuildRC
+        {
+            get { return _hideBuildRC; }
+            set { if (_hideBuildRC != value) { _hideBuildRC = value; pendingChangesOnAppClose = true; } }
+        }
+
+        [JsonIgnore]
+        private bool _hideBuildCustom = true;
+        [JsonPropertyName("hide_build_custom")]
+        public bool hideBuildCustom
+        {
+            get { return _hideBuildCustom; }
+            set { if (_hideBuildCustom != value) { _hideBuildCustom = value; pendingChangesOnAppClose = true; } }
+        }
+
+        [JsonIgnore]
+        private bool _hideBuildNightly = true;
+        [JsonPropertyName("hide_build_nightly")]
+        public bool hideBuildNightly
+        {
+            get { return _hideBuildNightly; }
+            set { if (_hideBuildNightly != value) { _hideBuildNightly = value; pendingChangesOnAppClose = true; } }
+        }
+
+        [JsonIgnore]
+        private MainWindowViewModel.SortType _sortType = MainWindowViewModel.SortType.name;
+        [JsonPropertyName("last_sort_type"), JsonConverter(typeof(JsonStringEnumConverter))]
+        public MainWindowViewModel.SortType sortType
+        {
+            get { return _sortType; }
+            set { if (_sortType != value) { _sortType = value; pendingChangesOnAppClose = true; } }
+        }
 
         /* FSO Settings that use the fs2_open.ini are json ignored */
 
@@ -141,7 +195,7 @@ namespace Knossos.NET.Models
         [JsonIgnore]
         public bool enableDeferredLighting { get; set; } = true;
         [JsonIgnore]
-        public int windowMode { get; set; } = 2;
+        public int windowMode { get; set; } = 0;
         [JsonIgnore]
         public bool vsync { get; set; } = true;
         [JsonIgnore]
@@ -165,7 +219,7 @@ namespace Knossos.NET.Models
         [JsonIgnore]
         public bool enableEfx { get; set; } = false;
         [JsonPropertyName("enable_tts")]
-        public bool enableTts { get; set; } = true;
+        public bool enableTts { get; set; } = false;
         [JsonIgnore]
         public int? ttsVoice { get; set; } = null;
         public string? ttsVoiceName { get; set; } = null;
@@ -207,15 +261,8 @@ namespace Knossos.NET.Models
         public string pxoLogin { get; set; } = "";
         [JsonIgnore]
         public string pxoPassword { get; set; } = "";
-
-        [JsonPropertyName("hide_build_rc")]
-        public bool hideBuildRC { get; set; } = true;
-        [JsonPropertyName("hide_build_custom")]
-        public bool hideBuildCustom { get; set; } = false;
-        [JsonPropertyName("hide_build_nightly")]
-        public bool hideBuildNightly { get; set; } = true;
-        [JsonPropertyName("last_sort_type"), JsonConverter(typeof(JsonStringEnumConverter))]
-        public MainWindowViewModel.SortType sortType { get; set; } = MainWindowViewModel.SortType.name;
+        [JsonPropertyName("portable_fso_preferences")]
+        public bool portableFsoPreferences { get; set; } = true;
 
         /* Developer Settings */
         [JsonPropertyName("no_system_cmd")]
@@ -229,6 +276,18 @@ namespace Knossos.NET.Models
         
         [JsonIgnore]
         private FileSystemWatcher? iniWatcher = null;
+
+        /// <summary>
+        /// Call this when the app is closing to save settings if we have pending changes
+        /// Note: this only applies to Knossos setting and not anything saved on the fs2_open.ini
+        /// </summary>
+        public void SaveSettingsOnAppClose()
+        {
+            if(pendingChangesOnAppClose)
+            {
+                Save(false);
+            }
+        }
 
         /// <summary>
         /// When the User is on the settings tab we must watch the fs2_open.ini for external changes
@@ -263,8 +322,13 @@ namespace Knossos.NET.Models
         /// </summary>
         public void EnableIniWatch()
         {
-            if(iniWatcher != null) 
+            if (iniWatcher != null)
                 iniWatcher.EnableRaisingEvents = true;
+            else
+            {
+                StartWatchingDirectory();
+                EnableIniWatch();
+            }
         }
 
         /// <summary>
@@ -291,12 +355,6 @@ namespace Knossos.NET.Models
                 var parser = new FileIniDataParser();
                 var data = parser.ReadFile(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "fs2_open.ini");
                 data.Configuration.AssigmentSpacer = string.Empty;
-
-                if(iniWatcher == null)
-                {
-                    StartWatchingDirectory();
-                }
-
 
                 //LEGACY ENTRIES, mostly read only by fso
                 /* Default Section */
@@ -608,12 +666,17 @@ namespace Knossos.NET.Models
                         prefixCMD = tempSettings.prefixCMD;
                         envVars = tempSettings.envVars;
                         showDevOptions = tempSettings.showDevOptions;
-
-                        if (MainWindowViewModel.Instance != null)
-                            MainWindowViewModel.Instance.sharedSortType = tempSettings.sortType;
+                        warnNewSettingsSystem = tempSettings.warnNewSettingsSystem;
+                        mainMenuOpen = tempSettings.mainMenuOpen;
+                        sortType = tempSettings.sortType;
+                        portableFsoPreferences = tempSettings.portableFsoPreferences;
 
                         ReadFS2IniValues();
                         Log.Add(Log.LogSeverity.Information, "GlobalSettings.Load()", "Global settings have been loaded");
+
+                        SetCustomModeValues();
+
+                        pendingChangesOnAppClose = false;
                     }
 
                 }
@@ -626,13 +689,36 @@ namespace Knossos.NET.Models
             {
                 Log.Add(Log.LogSeverity.Error, "GlobalSettings.Load()", ex);
             }
+            if(Knossos.inPortableMode)
+            {
+                basePath = Path.Combine(KnUtils.KnetFolderPath!, "kn_portable", "Library");
+            }
+        }
+
+        /// <summary>
+        /// Values controlled by CustomLauncher.cs in single tc mode
+        /// </summary>
+        private void SetCustomModeValues()
+        {
+            if (CustomLauncher.IsCustomMode)
+            {
+                checkUpdate = CustomLauncher.AllowLauncherUpdates;
+                enableLogFile = CustomLauncher.WriteLogFile;
+                autoUpdate = false;
+                if (!CustomLauncher.MenuDisplayGlobalSettingsEntry)
+                {
+                    warnNewSettingsSystem = false;
+                }
+            }
         }
 
         /// <summary>
         /// Save setting data to the fs2_open.ini
         /// Stops the ini-watcher if it was enabled and re-enables it to avoid triggering a read
+        /// Optional: Specific path to write the .ini to, need to be FULL PATH
         /// </summary>
-        public void WriteFS2IniValues()
+        /// <param name="customPath"></param>
+        public void WriteFS2IniValues(string? customFullPath = null)
         {
             try
             {
@@ -792,10 +878,20 @@ namespace Knossos.NET.Models
                     wasWatchingIni = iniWatcher.EnableRaisingEvents;
                     iniWatcher.EnableRaisingEvents = false;
                 }
-                parser.WriteFile(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "fs2_open.ini", data, new UTF8Encoding(false));
-                if(iniWatcher!= null && wasWatchingIni)
+                if (customFullPath == null)
+                {
+                    parser.WriteFile(KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "fs2_open.ini", data, new UTF8Encoding(false));
+                    Log.Add(Log.LogSeverity.Information, "GlobalSettings.WriteFS2IniValues", "Writen ini: " + KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "fs2_open.ini");
+                }
+                else
+                {
+
+                    parser.WriteFile(customFullPath, data, new UTF8Encoding(false));
+                    Log.Add(Log.LogSeverity.Information, "GlobalSettings.WriteFS2IniValues", "Writen ini: " + customFullPath);
+                }
+
+                if (iniWatcher!= null && wasWatchingIni)
                     iniWatcher.EnableRaisingEvents = true;
-                Log.Add(Log.LogSeverity.Information, "GlobalSettings.WriteFS2IniValues","Writen ini: "+ KnUtils.GetFSODataFolderPath() + Path.DirectorySeparatorChar + "fs2_open.ini");
             }
             catch (Exception ex)
             {
@@ -810,6 +906,7 @@ namespace Knossos.NET.Models
         /// <param name="writeIni"></param>
         public void Save(bool writeIni = true) 
         {
+            SetCustomModeValues();
             if (writeIni)
             {
                 WriteFS2IniValues();
@@ -830,6 +927,7 @@ namespace Knossos.NET.Models
                 var json = JsonSerializer.Serialize(this, options);
                 File.WriteAllText(KnUtils.GetKnossosDataFolderPath() + Path.DirectorySeparatorChar + "settings.json", json, new UTF8Encoding(false));
                 Log.Add(Log.LogSeverity.Information, "GlobalSettings.Save()", "Global settings have been saved.");
+                pendingChangesOnAppClose = false;
             }
             catch (Exception ex)
             {
